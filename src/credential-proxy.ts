@@ -13,6 +13,7 @@
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
+import { gunzipSync } from 'zlib';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
@@ -258,10 +259,7 @@ export function startCredentialProxy(
                   let rawResp: string;
                   // Fallback gzip decompression if server ignores accept-encoding: identity
                   if (rawBuf[0] === 0x1f && rawBuf[1] === 0x8b) {
-                    const zlib = await import('zlib');
-                    rawResp = await new Promise<string>((res, rej) => {
-                      zlib.gunzip(rawBuf, (err, r) => err ? rej(err) : res(r.toString()));
-                    });
+                    rawResp = gunzipSync(rawBuf).toString();
                   } else {
                     rawResp = rawBuf.toString();
                   }

@@ -113,6 +113,15 @@ function buildVolumeMounts(group, isMain) {
             readonly: false, // MCP may need to refresh OAuth tokens
         });
     }
+    // YouTube cookies for transcript API
+    const ytCookiesFile = path.join(process.cwd(), 'youtube_cookies.txt');
+    if (fs.existsSync(ytCookiesFile)) {
+        mounts.push({
+            hostPath: ytCookiesFile,
+            containerPath: '/opt/nanoclaw/youtube_cookies.txt',
+            readonly: true,
+        });
+    }
     // Per-group IPC namespace: each group gets its own IPC directory
     // This prevents cross-group privilege escalation via IPC
     const groupIpcDir = resolveGroupIpcPath(group.folder);

@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Python packages for YouTube transcript
-RUN pip3 install youtube-transcript-api requests[socks] --break-system-packages
+RUN pip3 install youtube-transcript-api requests[socks] yt-dlp --break-system-packages
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

@@ -139,6 +139,107 @@ Expected: `{"type":"message","stop_reason":"end_turn","content":[{"type":"text",
 
 ---
 
+## 📺 YouTube Transcript MCP
+
+### How it works
+
+YouTube blocks requests from Hetzner datacenter IPs and Tor exit nodes. The solution is **yt-dlp with browser cookies** — yt-dlp authenticates with your Google account cookies, which bypasses IP blocks.
+
+```
+User sends YouTube link → Agent calls mcp__youtube__get_transcripts → yt-dlp downloads .vtt subtitles → clean text returned
+```
+
+### Setup
+
+**1. Install yt-dlp on the server:**
+```bash
+pip3 install yt-dlp --break-system-packages
+```
+yt-dlp is also installed inside the Docker image (`container/Dockerfile`).
+
+**2. Export cookies from your browser:**
+- Install Chrome extension **"Get cookies.txt LOCALLY"**
+- Open youtube.com (make sure you're logged in to Google)
+- Click the extension → Export → save as `cookies.txt`
+- Copy to server:
+```bash
+scp cookies.txt root@46.62.246.93:/opt/nanoclaw/youtube_cookies.txt
+```
+
+**3. The MCP script** (`container/yt-transcript-mcp.py`) is already configured to use `/opt/nanoclaw/youtube_cookies.txt`.
+
+The file is mounted read-only into each container via `src/container-runner.ts`:
+```typescript
+const ytCookiesFile = path.join(process.cwd(), 'youtube_cookies.txt');
+if (fs.existsSync(ytCookiesFile)) {
+  mounts.push({
+    hostPath: ytCookiesFile,
+    containerPath: '/opt/nanoclaw/youtube_cookies.txt',
+    readonly: true,
+  });
+}
+```
+
+**4. yt-dlp requires Node.js** for YouTube's JS challenge solver. Node.js is already installed on the server (`/usr/bin/node`). The script uses `--js-runtimes node --remote-components ejs:github` flags automatically.
+
+### MCP server config (in `data/sessions/main/agent-runner-src/index.ts`)
+
+```typescript
+youtube: {
+  command: 'python3',
+  args: ['/usr/local/bin/yt-transcript-mcp.py'],
+},
+```
+
+### Agent instructions (in `groups/main/CLAUDE.md`)
+
+```
+## YouTube
+
+Use the MCP tool to get transcripts — it works via yt-dlp with cookies:
+
+mcp__youtube__get_transcripts(url="https://www.youtube.com/watch?v=VIDEO_ID", lang="ru")
+
+- ALWAYS call this tool when user sends a YouTube link — it works, do not skip it
+- Always pass lang="ru" first (most videos from user are in Russian). If fails, try without lang param.
+- Returns full transcript text — summarize it, do NOT paste all to user (can be very long)
+- NEVER use WebFetch on youtube.com — returns JS config, not transcript
+```
+
+### Testing the MCP script directly
+
+```bash
+# On the host:
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_transcripts","arguments":{"url":"https://www.youtube.com/watch?v=VIDEO_ID","lang":"ru"}}}' \
+  | python3 /usr/local/bin/yt-transcript-mcp.py
+
+# Inside a Docker container:
+docker run --rm \
+  -v /opt/nanoclaw/youtube_cookies.txt:/opt/nanoclaw/youtube_cookies.txt \
+  --entrypoint bash nanoclaw-agent:latest -c \
+  "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"get_transcripts\",\"arguments\":{\"url\":\"https://www.youtube.com/watch?v=VIDEO_ID\",\"lang\":\"ru\"}}}' | python3 /usr/local/bin/yt-transcript-mcp.py"
+```
+
+### Why not Tor?
+
+We tried routing through Tor (`socks5://172.17.0.1:9050`) but YouTube's transcript API (`youtube-transcript-api` library) specifically detects and blocks Tor exit node IPs — even when authenticated. yt-dlp with cookies works reliably.
+
+### Cookie expiry
+
+Cookies expire in ~1-2 years (see `expires` field in the cookies.txt file). When they expire:
+1. Export cookies again from Chrome (same extension)
+2. Copy to server: `scp cookies.txt root@46.62.246.93:/opt/nanoclaw/youtube_cookies.txt`
+3. No restart needed — the file is read on each request
+
+### Dockerfile changes
+
+Added to `container/Dockerfile`:
+```dockerfile
+RUN pip3 install youtube-transcript-api requests[socks] yt-dlp --break-system-packages
+```
+
+---
+
 ## 🛠 Our Customizations (Sergey0703/clawbot)
 
 **GitHub**: https://github.com/Sergey0703/clawbot  
@@ -149,7 +250,7 @@ Expected: `{"type":"message","stop_reason":"end_turn","content":[{"type":"text",
 - **Telegram voice transcription** — faster-whisper-server on 46.62.246.93:9000, auto language detect
 - **Acknowledgement messages** — bot confirms receipt before processing (voice shows transcript in quotes)
 - **Gmail MCP** — , OAuth token at 
-- **YouTube MCP** —  (note: Hetzner IP blocked by YouTube directly)
+- **YouTube MCP** — custom `yt-transcript-mcp.py` via yt-dlp with cookies (see YouTube section below)
 - **Quiet hours** — scheduled tasks suppressed 23:00–08:00 Europe/Dublin
 - **CLAUDE.md** — user info (name, email, timezone), YouTube instructions
 - **LLM**: NVIDIA API  via 
@@ -160,7 +261,7 @@ Expected: `{"type":"message","stop_reason":"end_turn","content":[{"type":"text",
 -  — mounted into container
 -  — master source
 -  — agent instructions
--  — YouTube cookies for yt-dlp
+- `/opt/nanoclaw/youtube_cookies.txt` — YouTube cookies for yt-dlp (Netscape format, export from browser)
 
 ### After editing index.ts:
 
@@ -490,19 +591,22 @@ pm2 restart nanoclaw
 - Telegram voice transcription via faster-whisper-server (46.62.246.93:9000)
 - Acknowledgement messages + voice transcript shown in quotes
 - Gmail MCP (@gongrzhe/server-gmail-autoauth-mcp)
-- YouTube MCP (@sinco-lab/mcp-youtube-transcript)
-- Quiet hours 23:00-08:00 Europe/Dublin (scheduled tasks suppressed)
-- CLAUDE.md: user info, email, YouTube instructions
-- LLM: NVIDIA API moonshotai/kimi-k2-instruct-0905
+- YouTube MCP — custom yt-transcript-mcp.py via yt-dlp + browser cookies (see YouTube section above)
+- CLAUDE.md: user info (name, email), YouTube instructions
+- LLM: Groq API qwen/qwen3-32b (see Groq section above)
 
 ### Key files:
-- /opt/nanoclaw/.env — API keys and model config
-- /opt/nanoclaw/data/sessions/main/agent-runner-src/index.ts — active agent source
-- /opt/nanoclaw/container/agent-runner/src/index.ts — master source
-- /opt/nanoclaw/groups/main/CLAUDE.md — agent instructions
-- /opt/nanoclaw/youtube-cookies.txt — YouTube cookies
+- `/opt/nanoclaw/.env` — API keys and model config
+- `/opt/nanoclaw/data/sessions/main/agent-runner-src/index.ts` — active agent source (mounted into container)
+- `/opt/nanoclaw/container/agent-runner/src/index.ts` — master source
+- `/opt/nanoclaw/groups/main/CLAUDE.md` — agent instructions
+- `/opt/nanoclaw/youtube_cookies.txt` — YouTube cookies (Netscape format, from browser)
+- `/opt/nanoclaw/container/yt-transcript-mcp.py` — YouTube MCP server script
 
 ### After editing index.ts:
-    cp /opt/nanoclaw/container/agent-runner/src/index.ts /opt/nanoclaw/data/sessions/main/agent-runner-src/index.ts
-    npm run build && pm2 restart nanoclaw
-    sqlite3 /opt/nanoclaw/store/messages.db 'DELETE FROM sessions;'
+```bash
+cp /opt/nanoclaw/container/agent-runner/src/index.ts \
+   /opt/nanoclaw/data/sessions/main/agent-runner-src/index.ts
+npm run build && pm2 restart nanoclaw --update-env
+sqlite3 /opt/nanoclaw/store/messages.db 'DELETE FROM sessions;'
+```
