@@ -25,7 +25,7 @@ function getUsageDb() {
         const dbPath = path.resolve(process.cwd(), 'store', 'messages.db');
         _usageDb = new Database(dbPath);
         _usageDb.exec(`
-      CREATE TABLE IF NOT EXISTS groq_usage (
+      CREATE TABLE IF NOT EXISTS llm_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
         date TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
@@ -41,7 +41,7 @@ function getUsageDb() {
 function logTokenUsage(model, promptTokens, completionTokens) {
     try {
         const db = getUsageDb();
-        db.prepare('INSERT INTO groq_usage (model, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?)').run(model, promptTokens, completionTokens, promptTokens + completionTokens);
+        db.prepare('INSERT INTO llm_usage (model, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?)').run(model, promptTokens, completionTokens, promptTokens + completionTokens);
     }
     catch (err) {
         logger.warn({ err }, 'Failed to log token usage');

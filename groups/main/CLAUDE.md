@@ -267,8 +267,39 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 
 The task will run in that group's context with access to their files and memory.
 
+## Commands
+
+### /llm-usage
+When user sends `/llm-usage`, run this Bash command and show results formatted nicely:
+```bash
+python3 -c "
+import sqlite3, datetime
+db = sqlite3.connect('/workspace/project/store/messages.db')
+today = datetime.date.today().isoformat()
+print('Today (' + today + '):')
+rows = db.execute('SELECT model, SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens), COUNT(*) FROM llm_usage WHERE date=? GROUP BY model ORDER BY 4 DESC', (today,)).fetchall()
+if not rows: print('  No data yet.')
+else:
+  for r in rows: print(f'  {r[0]}: {r[3]:,} tokens ({r[4]} requests)')
+print()
+print('Last 7 days:')
+rows = db.execute(\"SELECT date, SUM(total_tokens), COUNT(*) FROM llm_usage WHERE date >= date('now','-7 days') GROUP BY date ORDER BY date DESC\").fetchall()
+total = sum(r[1] for r in rows) if rows else 0
+for r in rows: print(f'  {r[0]}: {r[1]:,} tokens ({r[2]} requests)')
+print(f'  Total: {total:,} tokens')
+db.close()
+"
+```
+
 ## User Info
 
 - **Name**: Сергій
 - **Email**: sergey070373@gmail.com
 - **Telegram**: tg:940676896
+
+## Commands
+
+### /groq-usage
+When user sends , run this Bash command and show the results:
+```bash
+python3 -c 
