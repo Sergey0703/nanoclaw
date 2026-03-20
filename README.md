@@ -34,6 +34,108 @@ curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
 
 ---
 
+## 🔧 Running on Groq (OpenAI-compatible API) — Hetzner VPS Setup
+
+This instance runs NanoClaw on **Hetzner Server 1 (46.62.246.93)** using **Groq** instead of Anthropic.
+
+### Why a credential proxy is needed
+
+NanoClaw uses the Anthropic SDK internally. Groq uses OpenAI-compatible format. The proxy (`src/credential-proxy.ts`) converts everything on the fly:
+
+```
+Claude Code SDK → [Anthropic format] → credential-proxy → [OpenAI format] → Groq API
+                                                         ← [Anthropic format] ←
+```
+
+Without this proxy, the SDK would send Anthropic-format requests directly to Groq and get 400 errors.
+
+### .env configuration
+
+```
+ANTHROPIC_BASE_URL=https://api.groq.com/openai/v1
+ANTHROPIC_AUTH_TOKEN=gsk_...your_groq_api_key...
+ANTHROPIC_DEFAULT_SONNET_MODEL=qwen/qwen3-32b
+ANTHROPIC_DEFAULT_HAIKU_MODEL=qwen/qwen3-32b
+ANTHROPIC_DEFAULT_OPUS_MODEL=qwen/qwen3-32b
+ANTHROPIC_API_KEY=
+GROQ_API_KEY=gsk_...your_groq_api_key...
+DISABLE_GMAIL=true
+```
+
+### How to change the model
+
+Only edit `.env` — no code changes needed:
+
+```bash
+nano /opt/nanoclaw/.env
+# Change ANTHROPIC_DEFAULT_SONNET_MODEL / HAIKU / OPUS to the new model name
+sqlite3 /opt/nanoclaw/store/messages.db 'DELETE FROM sessions;'
+pm2 restart nanoclaw --update-env
+```
+
+**Available Groq models (tested 2026-03):**
+
+| Model | Status | Notes |
+|---|---|---|
+| `qwen/qwen3-32b` | ✅ Working | Best tool use, 300K tokens/min free tier |
+| `moonshotai/kimi-k2-instruct` | ⚠️ Avoid | Hangs on large requests |
+| `llama-3.3-70b-versatile` | ⚠️ Avoid | 429 rate limit on free tier |
+| `meta-llama/llama-4-scout-17b-16e-instruct` | ⚠️ Avoid | max_tokens hard limit 8192 |
+| `openai/gpt-oss-120b` | ❌ Broken | Generates invalid tool names like `WebSearch<\|channel\|>commentary` |
+| `llama-3.1-8b-instant` | ❌ Broken | Too weak for multi-step tool use |
+
+### Patches applied to credential-proxy
+
+All patches are in `src/credential-proxy.ts` and compiled into `dist/credential-proxy.js`.
+
+**1. Model selection via `ANTHROPIC_DEFAULT_SONNET_MODEL`**
+- Problem: proxy used `OPENROUTER_MODEL`, fell back to hardcoded `stepfun/step-3.5-flash:free` (doesn't exist on Groq)
+- Fix: added `ANTHROPIC_DEFAULT_SONNET_MODEL` to `readEnvFile()` — proxy reads model from `.env` first
+
+**2. Cloudflare WAF bypass (PostmanRuntime User-Agent)**
+- Problem: Groq routes traffic through Cloudflare. Hetzner datacenter IPs are flagged as bots → **403 error 1010** specifically on requests that include `tools`. Plain text requests work fine, tool requests get blocked.
+- Fix: `headers['user-agent'] = 'PostmanRuntime/7.37.3'` on all upstream requests
+
+**3. Disable gzip responses (`accept-encoding: identity`)**
+- Problem: SDK sends `Accept-Encoding: gzip` by default → Groq compresses response → `JSON.parse` throws `SyntaxError: Unexpected token 0x1f`
+- Fix: force `accept-encoding: identity` so Groq returns plain JSON
+
+**4. Gzip decompression fallback**
+- Why: even with `identity`, some responses may still arrive gzip-encoded
+- Fix: check magic bytes `0x1f 0x8b` — decompress with `zlib.gunzip()` before parsing
+
+**5. `isNvidiaResp = isNvidiaBase` (removed URL path check)**
+- Problem: original code: `isNvidiaResp = isNvidiaBase && req.url.includes('/v1/messages')`. When SDK appends `?beta=true`, the response conversion was sometimes skipped.
+- Fix: `isNvidiaResp = isNvidiaBase` — always convert response for Groq/NVIDIA/OpenRouter
+
+**6. max_tokens cap at 16000**
+- Problem: NanoClaw sends large `max_tokens` values; Groq models have varying output limits (8192–16384) → 400 error
+- Fix: cap at 16000 for all non-Anthropic endpoints
+
+**7. max_completion_tokens only for NVIDIA**
+- Problem: original code renamed `max_tokens→max_completion_tokens` for all providers; Groq uses `max_tokens`, not `max_completion_tokens`
+- Fix: rename only when URL contains `integrate.api.nvidia.com`
+
+### PM2 management
+
+```bash
+pm2 status
+pm2 logs nanoclaw --lines 50 --nostream
+pm2 restart nanoclaw --update-env
+```
+
+### Direct proxy test (without Telegram)
+
+```bash
+curl -X POST http://172.17.0.1:3001/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: placeholder" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Accept-Encoding: gzip" \
+  -d '{"model":"claude-sonnet-4-6","max_tokens":100,"messages":[{"role":"user","content":"Hi, say hello to Sergiy"}]}'
+```
+
+Expected: `{"type":"message","stop_reason":"end_turn","content":[{"type":"text","text":"..."}]}`
 
 ---
 
