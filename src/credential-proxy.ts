@@ -15,8 +15,44 @@ import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
 import { gunzipSync } from 'zlib';
 
+import Database from 'better-sqlite3';
+import path from 'path';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+
+// --- Token usage tracking ---
+let _usageDb: InstanceType<typeof Database> | null = null;
+function getUsageDb(): InstanceType<typeof Database> {
+  if (!_usageDb) {
+    const dbPath = path.resolve(process.cwd(), 'store', 'messages.db');
+    _usageDb = new Database(dbPath);
+    _usageDb.exec(`
+      CREATE TABLE IF NOT EXISTS groq_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        date TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
+        model TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+  }
+  return _usageDb;
+}
+
+function logTokenUsage(model: string, promptTokens: number, completionTokens: number): void {
+  try {
+    const db = getUsageDb();
+    db.prepare(
+      'INSERT INTO groq_usage (model, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?)'
+    ).run(model, promptTokens, completionTokens, promptTokens + completionTokens);
+  } catch (err) {
+    logger.warn({ err }, 'Failed to log token usage');
+  }
+}
+// --- End token usage tracking ---
+
 
 export type AuthMode = 'api-key' | 'oauth';
 
@@ -264,6 +300,14 @@ export function startCredentialProxy(
                     rawResp = rawBuf.toString();
                   }
                   const openaiResp = JSON.parse(rawResp);
+                  // Log token usage
+                  if (openaiResp.usage) {
+                    logTokenUsage(
+                      openaiResp.model || secrets.ANTHROPIC_DEFAULT_SONNET_MODEL || 'unknown',
+                      openaiResp.usage.prompt_tokens || 0,
+                      openaiResp.usage.completion_tokens || 0,
+                    );
+                  }
                   const choice = openaiResp.choices?.[0];
                   const msg = choice?.message || {};
                   // Build Anthropic content blocks
