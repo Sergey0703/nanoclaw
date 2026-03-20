@@ -240,6 +240,53 @@ RUN pip3 install youtube-transcript-api requests[socks] yt-dlp --break-system-pa
 
 ---
 
+## 📊 LLM Token Usage Tracking
+
+### How it works
+
+Every response from the LLM provider is intercepted by `src/credential-proxy.ts`, which reads the `usage` field and writes it to a local SQLite table `llm_usage`. Works with any provider (Groq, OpenRouter, NVIDIA, etc.) — model name is stored per row.
+
+Table schema:
+```sql
+CREATE TABLE IF NOT EXISTS llm_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  date TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
+  model TEXT NOT NULL,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0
+)
+```
+
+### Bot command: `/llm-usage`
+
+User sends `/llm-usage` → agent runs `python3 /workspace/project/llm_usage.py` → shows today's and last 7 days stats.
+
+The script `llm_usage.py` lives at `/opt/nanoclaw/llm_usage.py` (mounted read-only into container as `/workspace/project/llm_usage.py`).
+
+### Query directly on host
+
+```bash
+# Today by model
+sqlite3 /opt/nanoclaw/store/messages.db "
+  SELECT model, SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens), COUNT(*)
+  FROM llm_usage WHERE date = date('now') GROUP BY model;"
+
+# Last 7 days
+sqlite3 /opt/nanoclaw/store/messages.db "
+  SELECT date, SUM(total_tokens), COUNT(*)
+  FROM llm_usage WHERE date >= date('now', '-7 days')
+  GROUP BY date ORDER BY date DESC;"
+```
+
+### Notes
+- No Groq API endpoint exists for historical usage — this is the only way to track it
+- Table is created lazily on first LLM response
+- If you switch models, data is tracked per model in the same table
+
+---
+
 ## 🛠 Our Customizations (Sergey0703/clawbot)
 
 **GitHub**: https://github.com/Sergey0703/clawbot  
