@@ -333,6 +333,48 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'run_subagent',
+  'Launch a specialized subagent to handle a task. Use type="search" for web search, news, weather, or any real-time information queries. The subagent runs independently and returns the result.',
+  {
+    type: z.enum(['search']).describe('Subagent type: "search" for web search/news/weather'),
+    prompt: z.string().describe('Full task description for the subagent'),
+  },
+  async (args) => {
+    const requestId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const requestFile = path.join(IPC_DIR, 'subagent-requests', requestId + '.json');
+    const resultFile = path.join(IPC_DIR, 'subagent-results', requestId + '-result.json');
+
+    // Write request for host to pick up
+    fs.writeFileSync(requestFile, JSON.stringify({
+      requestId,
+      type: args.type,
+      prompt: args.prompt,
+      timestamp: new Date().toISOString(),
+    }));
+
+    // Poll for result (max 90 seconds)
+    const startTime = Date.now();
+    while (Date.now() - startTime < 90_000) {
+      await new Promise(r => setTimeout(r, 1000));
+      if (fs.existsSync(resultFile)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+          fs.unlinkSync(resultFile);
+          if (result.error) {
+            return { content: [{ type: 'text' as const, text: 'Subagent error: ' + result.error }], isError: true };
+          }
+          return { content: [{ type: 'text' as const, text: result.output }] };
+        } catch {
+          return { content: [{ type: 'text' as const, text: 'Failed to read subagent result' }], isError: true };
+        }
+      }
+    }
+
+    return { content: [{ type: 'text' as const, text: 'Subagent timed out after 90 seconds' }], isError: true };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
