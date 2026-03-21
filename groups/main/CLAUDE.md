@@ -287,3 +287,7 @@ python3 /workspace/project/llm_usage.py
 When user sends , run this Bash command and show the results:
 ```bash
 python3 -c 
+
+### /new
+When user sends `/new`, reply: "Контекст очищено. Починаємо з чистого аркуша! 🆕"
+(The session is automatically reset by the host after idle timeout. This command just acknowledges the reset.)

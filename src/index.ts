@@ -40,6 +40,7 @@ import {
   setRegisteredGroup,
   setRouterState,
   setSession,
+  deleteSession,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
@@ -206,6 +207,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         'Idle timeout, closing container stdin',
       );
       queue.closeStdin(chatJid);
+      // Clear session after idle — next message starts fresh context
+      sessions[group.folder] = '';
+      deleteSession(group.folder);
+      logger.info({ group: group.name }, 'Session cleared after idle timeout');
     }, IDLE_TIMEOUT);
   };
 
