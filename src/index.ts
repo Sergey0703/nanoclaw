@@ -16,7 +16,6 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import { runSubagentContainer } from './subagent-runner.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -272,19 +271,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+
 // --- Session compaction ---
 const SESSION_COMPACTION_THRESHOLD = 600_000; // 600KB
 
 function getSessionJsonlSize(groupFolder: string, sessionId: string): number {
   if (!sessionId) return 0;
-  const dir = path.join(
-    DATA_DIR,
-    'sessions',
-    groupFolder,
-    '.claude',
-    'projects',
-    '-workspace-group',
-  );
+  const dir = path.join(DATA_DIR, 'sessions', groupFolder, '.claude', 'projects', '-workspace-group');
   const file = path.join(dir, sessionId + '.jsonl');
   try {
     return fs.statSync(file).size;
@@ -298,10 +291,7 @@ async function compactSession(
   sessionId: string,
   chatJid: string,
 ): Promise<string | null> {
-  logger.info(
-    { group: group.name, sessionId },
-    'Session too large, generating summary...',
-  );
+  logger.info({ group: group.name, sessionId }, 'Session too large, generating summary...');
   const summaryPrompt = `Please create a concise summary of our conversation so far. Include: key topics discussed, important facts learned, ongoing tasks or goals, user preferences. Keep it under 500 words. Start with: ## Conversation Summary`;
 
   let summary: string | null = null;
@@ -340,10 +330,7 @@ async function runAgent(
   // Auto-compact if session JSONL is too large
   const sessionSize = getSessionJsonlSize(group.folder, sessionId);
   if (sessionSize > SESSION_COMPACTION_THRESHOLD) {
-    logger.info(
-      { group: group.name, sessionSize },
-      'Session size exceeds threshold, compacting...',
-    );
+    logger.info({ group: group.name, sessionSize }, 'Session size exceeds threshold, compacting...');
     const summary = await compactSession(group, sessionId, chatJid);
     // Reset session
     sessions[group.folder] = '';
@@ -351,10 +338,7 @@ async function runAgent(
     sessionId = '';
     if (summary) {
       prompt = `[Context from previous conversation]\n${summary}\n\n[New message]\n${prompt}`;
-      logger.info(
-        { group: group.name },
-        'Session compacted, summary prepended to prompt',
-      );
+      logger.info({ group: group.name }, 'Session compacted, summary prepended to prompt');
     }
   }
 
@@ -384,33 +368,6 @@ async function runAgent(
   );
 
   // Wrap onOutput to track session ID from streamed results
-  // Subagent watcher: poll for subagent requests from coordinator container
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
-  const subagentRequestDir = path.join(groupIpcDir, 'subagent-requests');
-  const subagentResultDir = path.join(groupIpcDir, 'subagent-results');
-  const subagentWatcher = setInterval(() => {
-    try {
-      const files = fs.readdirSync(subagentRequestDir).filter((f: string) => f.endsWith('.json'));
-      for (const file of files) {
-        const requestPath = path.join(subagentRequestDir, file);
-        let req: { requestId: string; type: string; prompt: string; timestamp: string };
-        try {
-          req = JSON.parse(fs.readFileSync(requestPath, 'utf-8'));
-          fs.unlinkSync(requestPath);
-        } catch { continue; }
-        (async () => {
-          const resultPath = path.join(subagentResultDir, req.requestId + '-result.json');
-          try {
-            const output = await runSubagentContainer(group, req as any, chatJid);
-            fs.writeFileSync(resultPath, JSON.stringify({ output, error: null }));
-          } catch (err) {
-            fs.writeFileSync(resultPath, JSON.stringify({ output: null, error: String(err) }));
-          }
-        })();
-      }
-    } catch { /* dir may not exist yet */ }
-  }, 500);
-
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
@@ -450,10 +407,8 @@ async function runAgent(
       return 'error';
     }
 
-    clearInterval(subagentWatcher);
     return 'success';
   } catch (err) {
-    clearInterval(subagentWatcher);
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
   }

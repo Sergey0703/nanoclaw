@@ -329,8 +329,6 @@ function waitForIpcMessage(): Promise<string | null> {
  * allowing agent teams subagents to run to completion.
  * Also pipes IPC messages into the stream during the query.
  */
-const subagentType = process.env.NANOCLAW_SUBAGENT_TYPE || null;
-
 async function runQuery(
   prompt: string,
   sessionId: string | undefined,
@@ -404,37 +402,33 @@ async function runQuery(
         : undefined,
       // tools: limits which tool *definitions* are included in the system prompt
       // This reduces token usage significantly for providers with small TPM limits
-      tools: subagentType === 'search'
-        ? ['WebSearch', 'WebFetch']
-        : [
-            'Bash',
-            'Read', 'Write', 'Edit', 'Glob', 'Grep',
-            'WebSearch', 'WebFetch',
-            'Task', 'TaskOutput', 'TaskStop',
-            'TodoWrite',
-            'mcp__nanoclaw__*',
-            'mcp__gmail__*',
-            'mcp__youtube__*',
-          ],
-      allowedTools: subagentType === 'search'
-        ? ['WebSearch', 'WebFetch']
-        : [
-            'Bash',
-            'Read', 'Write', 'Edit', 'Glob', 'Grep',
-            'WebSearch', 'WebFetch',
-            'Task', 'TaskOutput', 'TaskStop',
-            'TeamCreate', 'TeamDelete', 'SendMessage',
-            'TodoWrite', 'ToolSearch', 'Skill',
-            'NotebookEdit',
-            'mcp__nanoclaw__*',
-            'mcp__gmail__*',
-            'mcp__youtube__*',
-          ],
+      tools: [
+        'Bash',
+        'Read', 'Write', 'Edit', 'Glob', 'Grep',
+        'WebSearch', 'WebFetch',
+        'Task', 'TaskOutput', 'TaskStop',
+        'TodoWrite',
+        'mcp__nanoclaw__*',
+        'mcp__gmail__*',
+        'mcp__youtube__*',
+      ],
+      allowedTools: [
+        'Bash',
+        'Read', 'Write', 'Edit', 'Glob', 'Grep',
+        'WebSearch', 'WebFetch',
+        'Task', 'TaskOutput', 'TaskStop',
+        'TeamCreate', 'TeamDelete', 'SendMessage',
+        'TodoWrite', 'ToolSearch', 'Skill',
+        'NotebookEdit',
+        'mcp__nanoclaw__*',
+        'mcp__gmail__*',
+        'mcp__youtube__*',
+      ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: subagentType ? {} : {
+      mcpServers: {
         nanoclaw: {
           command: 'node',
           args: [mcpServerPath],
